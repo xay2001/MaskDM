@@ -156,6 +156,7 @@ runs
 /examples/runs
 /examples/**/*.args
 /examples/rag/sweep
+/swanlog
 
 # data
 /data
