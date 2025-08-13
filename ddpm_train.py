@@ -268,6 +268,19 @@ def main(args):
             raise ImportError("Make sure to install wandb if you want to use it for logging during training.")
         import wandb
 
+        # 设置wandb离线模式（避免网络问题）
+        os.environ["WANDB_MODE"] = "offline"
+        
+        # 添加SwanLab同步
+        try:
+            import swanlab
+            # 同步wandb到SwanLab，wandb设置为离线模式
+            swanlab.sync_wandb(wandb_run=False)
+            print("SwanLab同步已启用，wandb数据将同步到SwanLab")
+        except ImportError:
+            print("wanLab未安装，跳过同步设置")
+
+
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
