@@ -99,13 +99,36 @@ def calculate_real_macs(model, example_inputs):
 def apply_weight_pruning(model, pruning_ratio, method='magnitude'):
     """Apply weight-level pruning to Conv2d and Linear layers"""
     
-    # Collect all Conv2d and Linear modules
+    # 定义保护层模式（保守策略）
+    PROTECTED_PATTERNS = [
+        "time_emb_proj",     # 时间嵌入投影层
+        "time_embedding",    # 时间嵌入层
+        "time_embed",        # 时间嵌入变种
+        "conv_in",           # 输入层保护
+        "conv_out",          # 输出层保护
+    ]
+    
+    # 收集要剪枝的模块（过滤掉保护的层）
     modules_to_prune = []
+    protected_count = 0
+    total_count = 0
+    
     for name, module in model.named_modules():
         if isinstance(module, (nn.Conv2d, nn.Linear)):
-            modules_to_prune.append((module, 'weight'))
+            total_count += 1
             
-    print(f"Found {len(modules_to_prune)} layers to prune (Conv2d + Linear)")
+            # 检查是否是保护层
+            is_protected = any(pattern in name for pattern in PROTECTED_PATTERNS)
+            
+            if is_protected:
+                protected_count += 1
+                print(f"🔒 保护层: {name} (类型: {type(module).__name__})")
+            else:
+                modules_to_prune.append((module, 'weight'))
+                
+    print(f"总共找到 {total_count} 层 (Conv2d + Linear)")
+    print(f"保护了 {protected_count} 层免于剪枝")
+    print(f"将对 {len(modules_to_prune)} 层进行剪枝")
     
     # Apply pruning based on method
     if method == 'magnitude':
@@ -119,7 +142,9 @@ def apply_weight_pruning(model, pruning_ratio, method='magnitude'):
     else:
         raise ValueError(f"Unknown pruning method: {method}")
     
-    print(f"Applied {method} pruning with ratio {pruning_ratio}")
+    print(f"✅ 成功应用 {method} 剪枝，剪枝比例 {pruning_ratio}")
+    print(f"实际剪枝层数: {len(modules_to_prune)}/{total_count}")
+    print(f"保护层数: {protected_count}/{total_count}")
 
 def remove_pruning_masks(model):
     """Remove pruning masks and make pruning permanent"""
