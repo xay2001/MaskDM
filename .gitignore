@@ -418,3 +418,12 @@ Maskpro/initial_mask/up_blocks.3.resnets.2.conv_shortcut.pt
 Maskpro/initial_mask/up_blocks.3.resnets.2.conv1.pt
 Maskpro/initial_mask/up_blocks.3.resnets.2.conv2.pt
 Maskpro/initial_mask/up_blocks.3.resnets.2.time_emb_proj.pt
+data_cache/cifar-10-python.tar.gz
+data_cache/cifar-10-batches-py/batches.meta
+data_cache/cifar-10-batches-py/data_batch_1
+data_cache/cifar-10-batches-py/data_batch_2
+data_cache/cifar-10-batches-py/data_batch_3
+data_cache/cifar-10-batches-py/data_batch_4
+data_cache/cifar-10-batches-py/data_batch_5
+data_cache/cifar-10-batches-py/readme.html
+data_cache/cifar-10-batches-py/test_batch

@@ -22,10 +22,10 @@ def mask_wrapper_diffusion(module, prefix=""):
             mask = module.weight.data != 0
             
             # 确保initial_mask目录存在
-            os.makedirs("initial_mask", exist_ok=True)
+            os.makedirs("Maskpro/initial_mask", exist_ok=True)
             
             # 保存掩码
-            save_path = f"initial_mask/{prefix}.pt"
+            save_path = f"Maskpro/initial_mask/{prefix}.pt"
             torch.save(mask, save_path)
             
             # 打印信息
@@ -104,6 +104,6 @@ if __name__ == "__main__":
     print("Mask extraction completed!")
     
     # 统计生成的掩码文件
-    mask_files = [f for f in os.listdir("initial_mask") if f.endswith('.pt')]
+    mask_files = [f for f in os.listdir("Maskpro/initial_mask") if f.endswith('.pt')]
     print(f"Generated {len(mask_files)} mask files in initial_mask/")
     print("="*60)
