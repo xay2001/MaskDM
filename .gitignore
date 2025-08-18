@@ -234,3 +234,4 @@ Maskpro/inference_loss_diffusion_cifar10_bs32_size16_summary.txt
 
 # 重复的 .gitignore 条目
 .gitignore
+Maskpro/inference_loss_diffusion_cifar10_bs32_size16.npy
