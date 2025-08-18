@@ -2,21 +2,19 @@ from diffusers import DiffusionPipeline, DDPMPipeline, DDIMPipeline, DDIMSchedul
 from diffusers.models import UNet2DModel
 import torch
 import torch.nn as nn
-import torch.nn.utils.prune as prune
 import torchvision
 from torchvision import transforms
-import torchvision
 from tqdm import tqdm
 import os
 from glob import glob
 from PIL import Image
 import accelerate
 import utils
-import torch_pruning as tp
+import numpy as np
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument("--dataset", type=str,  default=None, help="path to an image folder")
+parser.add_argument("--dataset", type=str, default=None, help="path to an image folder")
 parser.add_argument("--model_path", type=str, required=True)
 parser.add_argument("--save_path", type=str, required=True)
 parser.add_argument("--pruning_ratio", type=float, default=0.3)
@@ -26,134 +24,92 @@ parser.add_argument("--pruner", type=str, default='magnitude', choices=['magnitu
 
 args = parser.parse_args()
 
-batch_size = args.batch_size
-dataset = args.dataset
-
-def count_parameters(model):
-    """Count total and non-zero parameters"""
-    total_params = 0
-    non_zero_params = 0
-    
-    for module in model.modules():
-        if isinstance(module, (nn.Conv2d, nn.Linear)):
-            if hasattr(module, 'weight'):
-                # 如果有剪枝mask，统计剪枝后的参数
-                if hasattr(module, 'weight_mask'):
-                    weight = module.weight * module.weight_mask
-                else:
-                    weight = module.weight
-                total_params += module.weight.numel()
-                non_zero_params += torch.count_nonzero(weight).item()
-            if hasattr(module, 'bias') and module.bias is not None:
-                total_params += module.bias.numel()
-                non_zero_params += torch.count_nonzero(module.bias).item()
-    
-    return total_params, non_zero_params
-
-def calculate_real_macs(model, example_inputs):
-    """Calculate real MACs by measuring actual operations with sparse weights"""
-    total_macs = 0
-    
-    def add_hooks(module):
-        def hook(module, input, output):
-            nonlocal total_macs
-            if isinstance(module, nn.Conv2d):
-                if hasattr(module, 'weight'):
-                    # 计算稀疏权重的比例
-                    total_weights = module.weight.numel()
-                    non_zero_weights = torch.count_nonzero(module.weight).item()
-                    sparsity_ratio = non_zero_weights / total_weights if total_weights > 0 else 0
-                    
-                    # 计算输出特征图大小（除去batch维度）
-                    output_elements = output.numel() // output.shape[0]
-                    
-                    # 每个输出位置需要的原始操作数 = input_channels * kernel_h * kernel_w
-                    kernel_ops_per_output = module.weight.shape[1] * module.weight.shape[2] * module.weight.shape[3]
-                    
-                    # 稀疏权重下的实际操作数 = 输出位置数 * 每个位置的操作数 * 稀疏比例
-                    actual_macs = output_elements * kernel_ops_per_output * sparsity_ratio
-                    total_macs += actual_macs
-                    
-            elif isinstance(module, nn.Linear):
-                if hasattr(module, 'weight'):
-                    # Linear层：非零权重数量 * batch_size
-                    non_zero_weights = torch.count_nonzero(module.weight).item()
-                    batch_size = input[0].shape[0] if len(input) > 0 else 1
-                    total_macs += non_zero_weights * batch_size
+def apply_magnitude_pruning(module, pruning_ratio):
+    """Apply magnitude-based weight pruning to a module"""
+    if isinstance(module, (nn.Conv2d, nn.Linear)):
+        weight = module.weight.data
+        # Flatten the weight tensor
+        weight_flat = weight.view(-1)
+        # Calculate threshold for magnitude pruning
+        num_weights = weight_flat.numel()
+        num_prune = int(num_weights * pruning_ratio)
         
-        return hook
-    
-    hooks = []
-    for module in model.modules():
-        if isinstance(module, (nn.Conv2d, nn.Linear)):
-            hooks.append(module.register_forward_hook(add_hooks(module)))
-    
-    with torch.no_grad():
-        model(**example_inputs)
-    
-    for hook in hooks:
-        hook.remove()
-    
-    return total_macs
+        if num_prune > 0:
+            # Get the threshold value (smallest magnitude to keep)
+            weight_abs = torch.abs(weight_flat)
+            threshold = torch.topk(weight_abs, num_weights - num_prune, largest=True)[0][-1]
+            
+            # Create mask: keep weights with magnitude >= threshold
+            mask = weight_abs >= threshold
+            
+            # Apply mask to weights
+            weight_flat[~mask] = 0
+            module.weight.data = weight_flat.view(weight.shape)
+            
+            actual_sparsity = (weight_flat == 0).float().mean().item()
+            return actual_sparsity
+    return 0.0
 
-def apply_weight_pruning(model, pruning_ratio, method='magnitude'):
-    """Apply weight-level pruning to Conv2d and Linear layers"""
+def apply_random_pruning(module, pruning_ratio):
+    """Apply random weight pruning to a module"""
+    if isinstance(module, (nn.Conv2d, nn.Linear)):
+        weight = module.weight.data
+        # Flatten the weight tensor
+        weight_flat = weight.view(-1)
+        num_weights = weight_flat.numel()
+        num_prune = int(num_weights * pruning_ratio)
+        
+        if num_prune > 0:
+            # Randomly select indices to prune
+            indices = torch.randperm(num_weights)[:num_prune]
+            weight_flat[indices] = 0
+            module.weight.data = weight_flat.view(weight.shape)
+            
+            actual_sparsity = (weight_flat == 0).float().mean().item()
+            return actual_sparsity
+    return 0.0
+
+def get_prunable_modules(model):
+    """Get all prunable modules and categorize them by importance"""
+    prunable_modules = []
+    protected_modules = []
     
-    # 定义保护层模式（保守策略）
-    PROTECTED_PATTERNS = [
-        "time_emb_proj",     # 时间嵌入投影层
-        "time_embedding",    # 时间嵌入层
-        "time_embed",        # 时间嵌入变种
-        "conv_in",           # 输入层保护
-        "conv_out",          # 输出层保护
-    ]
-    
-    # 收集要剪枝的模块（过滤掉保护的层）
-    modules_to_prune = []
-    protected_count = 0
-    total_count = 0
-    
+    # Collect all named modules
     for name, module in model.named_modules():
         if isinstance(module, (nn.Conv2d, nn.Linear)):
-            total_count += 1
-            
-            # 检查是否是保护层
-            is_protected = any(pattern in name for pattern in PROTECTED_PATTERNS)
-            
-            if is_protected:
-                protected_count += 1
-                print(f"🔒 保护层: {name} (类型: {type(module).__name__})")
+            # Protect critical layers
+            if ('conv_in' in name or 
+                'conv_out' in name or 
+                'time_emb' in name or
+                'class_emb' in name):
+                protected_modules.append((name, module))
+                print(f"Protecting layer: {name}")
             else:
-                modules_to_prune.append((module, 'weight'))
-                
-    print(f"总共找到 {total_count} 层 (Conv2d + Linear)")
-    print(f"保护了 {protected_count} 层免于剪枝")
-    print(f"将对 {len(modules_to_prune)} 层进行剪枝")
+                prunable_modules.append((name, module))
     
-    # Apply pruning based on method
-    if method == 'magnitude':
-        # Use L1Unstructured (magnitude-based) pruning
-        for module, param_name in modules_to_prune:
-            prune.l1_unstructured(module, name=param_name, amount=pruning_ratio)
-    elif method == 'random':
-        # Use RandomUnstructured pruning
-        for module, param_name in modules_to_prune:
-            prune.random_unstructured(module, name=param_name, amount=pruning_ratio)
-    else:
-        raise ValueError(f"Unknown pruning method: {method}")
-    
-    print(f"✅ 成功应用 {method} 剪枝，剪枝比例 {pruning_ratio}")
-    print(f"实际剪枝层数: {len(modules_to_prune)}/{total_count}")
-    print(f"保护层数: {protected_count}/{total_count}")
+    return prunable_modules, protected_modules
 
-def remove_pruning_masks(model):
-    """Remove pruning masks and make pruning permanent"""
+def calculate_model_sparsity(model):
+    """Calculate overall model sparsity"""
+    total_params = 0
+    zero_params = 0
+    
     for module in model.modules():
         if isinstance(module, (nn.Conv2d, nn.Linear)):
-            try:
-                prune.remove(module, 'weight')
-            except:
-                pass  # No pruning mask to remove
+            weight = module.weight.data
+            total_params += weight.numel()
+            zero_params += (weight == 0).sum().item()
+    
+    return zero_params / total_params if total_params > 0 else 0.0
+
+def print_layer_sparsity(model):
+    """Print sparsity information for each layer"""
+    print("\n=== Layer-wise Sparsity ===")
+    for name, module in model.named_modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear)):
+            weight = module.weight.data
+            sparsity = (weight == 0).float().mean().item()
+            print(f"{name}: {sparsity:.4f} ({weight.shape})")
 
 if __name__=='__main__':
     
@@ -168,43 +124,105 @@ if __name__=='__main__':
     else:
         example_inputs = {'sample': torch.randn(1, 3, 256, 256).to(args.device), 'timestep': torch.ones((1,)).long().to(args.device)}
 
-    if args.pruning_ratio > 0:
-        # Count parameters and operations before pruning using torch_pruning (standard)
-        base_macs, base_params = tp.utils.count_ops_and_params(model, example_inputs)
-        
-        print(f"Applying weight-level {args.pruner} pruning...")
-        
-        # Apply weight-level pruning
-        apply_weight_pruning(model, args.pruning_ratio, args.pruner)
-        
-        # Count parameters after pruning (with masks)
-        total_params, params = count_parameters(model)
-        
-        # Make pruning permanent (remove masks) to get actual sparse weights
-        remove_pruning_masks(model)
-        
-        # Calculate real MACs by measuring actual operations with sparse weights
-        print("Calculating real MACs with sparse weights...")
-        macs = calculate_real_macs(model, example_inputs)
-        
-        print(model)
-        print("#Params: {:.4f} M => {:.4f} M".format(base_params/1e6, params/1e6))
-        print("#MACS: {:.4f} G => {:.4f} G".format(base_macs/1e9, macs/1e9))
-        print("Sparsity ratio: {:.2f}%".format((1 - params/base_params) * 100))
+    # Calculate initial parameters
+    def count_parameters(model):
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        return total_params, trainable_params
 
+    initial_total, initial_trainable = count_parameters(model)
+    print(f"Initial parameters: {initial_total:,} total, {initial_trainable:,} trainable")
+    
+    if args.pruning_ratio > 0:
+        print(f"\nApplying {args.pruner} pruning with ratio {args.pruning_ratio}")
+        
+        # Get prunable and protected modules
+        prunable_modules, protected_modules = get_prunable_modules(model)
+        
+        print(f"Found {len(prunable_modules)} prunable layers and {len(protected_modules)} protected layers")
+        
+        # Apply pruning
+        total_sparsity = 0
+        pruned_layers = 0
+        
+        for name, module in tqdm(prunable_modules, desc="Pruning layers"):
+            if args.pruner == 'magnitude':
+                sparsity = apply_magnitude_pruning(module, args.pruning_ratio)
+            elif args.pruner == 'random':
+                sparsity = apply_random_pruning(module, args.pruning_ratio)
+            
+            if sparsity > 0:
+                total_sparsity += sparsity
+                pruned_layers += 1
+                print(f"Pruned {name}: {sparsity:.4f} sparsity")
+        
+        # Calculate final statistics
+        overall_sparsity = calculate_model_sparsity(model)
+        avg_layer_sparsity = total_sparsity / pruned_layers if pruned_layers > 0 else 0
+        
+        print(f"\n=== Pruning Results ===")
+        print(f"Pruning method: {args.pruner}")
+        print(f"Target pruning ratio: {args.pruning_ratio}")
+        print(f"Layers pruned: {pruned_layers}")
+        print(f"Average layer sparsity: {avg_layer_sparsity:.4f}")
+        print(f"Overall model sparsity: {overall_sparsity:.4f}")
+        
+        # Print detailed layer information
+        print_layer_sparsity(model)
+        
+    # Save the pruned model
+    print(f"\nSaving model to {args.save_path}")
     pipeline.save_pretrained(args.save_path)
+    
     if args.pruning_ratio > 0:
         os.makedirs(os.path.join(args.save_path, "pruned"), exist_ok=True)
-        torch.save(model, os.path.join(args.save_path, "pruned", "unet_weight_pruned.pth"))
-
-    # Sampling images from the pruned model
-    pipeline = DDIMPipeline(
-        unet = model,
-        scheduler = DDIMScheduler.from_pretrained(args.save_path, subfolder="scheduler")
-    )
-    with torch.no_grad():
-        generator = torch.Generator(device=pipeline.device).manual_seed(0)
-        pipeline.to("cuda")
-        images = pipeline(num_inference_steps=100, batch_size=args.batch_size, generator=generator, output_type="numpy").images
-        os.makedirs(os.path.join(args.save_path, 'vis'), exist_ok=True)
-        torchvision.utils.save_image(torch.from_numpy(images).permute([0, 3, 1, 2]), "{}/vis/after_weight_pruning.png".format(args.save_path))
+        torch.save(model, os.path.join(args.save_path, "pruned", "unet_pruned.pth"))
+        
+        # Save pruning statistics
+        stats = {
+            'pruning_method': args.pruner,
+            'target_ratio': args.pruning_ratio,
+            'layers_pruned': pruned_layers,
+            'avg_layer_sparsity': avg_layer_sparsity,
+            'overall_sparsity': overall_sparsity,
+            'initial_params': initial_total,
+            'prunable_layers': len(prunable_modules),
+            'protected_layers': len(protected_modules)
+        }
+        
+        import json
+        with open(os.path.join(args.save_path, "pruning_stats.json"), 'w') as f:
+            json.dump(stats, f, indent=2)
+    
+    # Test the pruned model with a sample generation
+    print("\nTesting pruned model with sample generation...")
+    try:
+        pipeline = DDIMPipeline(
+            unet=model,
+            scheduler=DDIMScheduler.from_pretrained(args.save_path, subfolder="scheduler")
+        )
+        
+        with torch.no_grad():
+            generator = torch.Generator(device=pipeline.device).manual_seed(0)
+            pipeline.to(args.device)
+            # Generate a smaller batch for testing
+            test_batch_size = min(4, args.batch_size)
+            images = pipeline(
+                num_inference_steps=50, 
+                batch_size=test_batch_size, 
+                generator=generator, 
+                output_type="numpy"
+            ).images
+            
+            os.makedirs(os.path.join(args.save_path, 'vis'), exist_ok=True)
+            torchvision.utils.save_image(
+                torch.from_numpy(images).permute([0, 3, 1, 2]), 
+                "{}/vis/after_weight_pruning.png".format(args.save_path)
+            )
+            print("Sample generation successful!")
+            
+    except Exception as e:
+        print(f"Sample generation failed: {e}")
+        print("This might indicate that the pruning ratio is too aggressive.")
+    
+    print("Weight pruning completed!")
