@@ -1,109 +1,102 @@
 import torch
 import torch.nn as nn
-from diffusers import DDPMPipeline
 import os
+from diffusers import DDPMPipeline
 import argparse
 
-def mask_wrapper_diffusion(module, prefix=""):
-    """
-    Extract masks from pruned diffusion model (UNet)
-    处理扩散模型的掩码提取，支持Conv2d和Linear层
-    """
-    
-    for name, child in module.named_children():
-        full_name = f"{prefix}.{name}" if prefix else name
-        # 递归处理子模块
-        mask_wrapper_diffusion(child, full_name)
-    
-    # 处理Conv2d和Linear层
-    if isinstance(module, (nn.Conv2d, nn.Linear)):
-        if hasattr(module, 'weight') and module.weight is not None:
-            # 生成掩码：非零权重位置为True
-            mask = module.weight.data != 0
-            
-            # 确保initial_mask目录存在
-            os.makedirs("Maskpro/initial_mask", exist_ok=True)
-            
-            # 保存掩码
-            save_path = f"Maskpro/initial_mask/{prefix}.pt"
-            torch.save(mask, save_path)
-            
-            # 打印信息
-            total_params = module.weight.numel()
-            non_zero_params = torch.count_nonzero(module.weight).item()
-            sparsity = (1 - non_zero_params / total_params) * 100
-            
-            print(f"Saved mask: {save_path}")
-            print(f"  Shape: {mask.shape}")
-            print(f"  Sparsity: {sparsity:.2f}% ({non_zero_params}/{total_params})")
-            print()
+parser = argparse.ArgumentParser()
+parser.add_argument('--model_path', type=str, required=True, help='Path to the pruned DDPM model')
+parser.add_argument('--output_dir', type=str, default='Maskpro/initial_mask_diffusion', help='Directory to save masks')
+args = parser.parse_args()
 
-def load_pruned_diffusion_model(model_path, device='cpu'):
-    """
-    加载剪枝后的扩散模型
-    """
+def extract_masks_from_pruned_ddpm(model, output_dir):
+    """Extract binary masks from a pruned DDPM model and save them"""
+    os.makedirs(output_dir, exist_ok=True)
+    
+    extracted_count = 0
+    total_layers = 0
+    
+    for name, module in model.named_modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear)):
+            total_layers += 1
+            
+            # Skip protected layers that shouldn't be masked for MaskPro
+            if ('conv_in' in name or 
+                'conv_out' in name or 
+                'time_emb' in name or
+                'class_emb' in name):
+                print(f"Skipping protected layer: {name}")
+                continue
+            
+            # Extract mask (True for non-zero weights, False for zero weights)
+            weight = module.weight.data
+            mask = (weight != 0)
+            
+            # Calculate sparsity
+            sparsity = (weight == 0).float().mean().item()
+            
+            if sparsity > 0:  # Only save masks for layers that have been pruned
+                # Clean the name for file saving (replace dots and slashes)
+                clean_name = name.replace('.', '_').replace('/', '_')
+                save_path = os.path.join(output_dir, f"{clean_name}.pt")
+                
+                torch.save(mask, save_path)
+                print(f"Saved mask for {name} -> {clean_name}.pt (sparsity: {sparsity:.4f}, shape: {mask.shape})")
+                extracted_count += 1
+            else:
+                print(f"Skipping {name} (no pruning detected, sparsity: {sparsity:.4f})")
+    
+    print(f"\n=== Mask Extraction Summary ===")
+    print(f"Total layers examined: {total_layers}")
+    print(f"Masks extracted: {extracted_count}")
+    print(f"Output directory: {output_dir}")
+    
+    return extracted_count
+
+if __name__ == '__main__':
+    print(f"Loading DDPM model from {args.model_path}")
+    
+    # Try to load as DDPMPipeline first
     try:
-        # 方法1: 尝试直接加载保存的UNet模型
-        unet_path = os.path.join(model_path, "pruned", "unet_weight_pruned.pth")
-        if os.path.exists(unet_path):
-            print(f"Loading pruned UNet from: {unet_path}")
-            unet = torch.load(unet_path, map_location=device)
-            return unet
+        if os.path.isfile(os.path.join(args.model_path, "model_index.json")):
+            # Load as pipeline
+            pipeline = DDPMPipeline.from_pretrained(args.model_path)
+            model = pipeline.unet
+            print("Loaded as DDPM Pipeline")
+        elif os.path.isfile(os.path.join(args.model_path, "pruned", "unet_pruned.pth")):
+            # Load as saved PyTorch model
+            model = torch.load(os.path.join(args.model_path, "pruned", "unet_pruned.pth"), map_location='cpu')
+            print("Loaded as PyTorch model from pruned directory")
         else:
-            # 方法2: 尝试加载完整的pipeline
-            print(f"Loading pipeline from: {model_path}")
-            pipeline = DDPMPipeline.from_pretrained(model_path)
-            return pipeline.unet
+            raise FileNotFoundError("Could not find a valid DDPM model")
             
     except Exception as e:
         print(f"Error loading model: {e}")
-        return None
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Extract masks from pruned diffusion model")
-    parser.add_argument("--model_path", type=str, 
-                       default="/data/xay/MaskDM/run/pruned/weight_magnitude/ddpm_cifar10_weight_pruned",
-                       help="Path to the pruned diffusion model")
-    parser.add_argument("--device", type=str, default="cpu", help="Device to load model on")
-    
-    args = parser.parse_args()
-    
-    print("="*60)
-    print("Extracting masks from pruned diffusion model")
-    print("="*60)
-    
-    # 加载剪枝后的模型
-    print(f"Loading model from: {args.model_path}")
-    model = load_pruned_diffusion_model(args.model_path, args.device)
-    
-    if model is None:
-        print("Failed to load model!")
+        print("Please check the model path and format")
         exit(1)
     
-    print(f"Model loaded successfully!")
-    print(f"Model type: {type(model)}")
-    print()
+    print(f"Model loaded successfully: {type(model)}")
+    print(f"Model device: {next(model.parameters()).device}")
     
-    # 统计模型中的层数
-    conv_count = 0
-    linear_count = 0
-    for module in model.modules():
-        if isinstance(module, nn.Conv2d):
-            conv_count += 1
-        elif isinstance(module, nn.Linear):
-            linear_count += 1
+    # Extract masks
+    num_masks = extract_masks_from_pruned_ddpm(model, args.output_dir)
     
-    print(f"Found {conv_count} Conv2d layers and {linear_count} Linear layers")
-    print()
-    
-    # 提取掩码
-    print("Extracting masks...")
-    mask_wrapper_diffusion(model)
-    
-    print("="*60)
-    print("Mask extraction completed!")
-    
-    # 统计生成的掩码文件
-    mask_files = [f for f in os.listdir("Maskpro/initial_mask") if f.endswith('.pt')]
-    print(f"Generated {len(mask_files)} mask files in initial_mask/")
-    print("="*60)
+    if num_masks == 0:
+        print("\nWarning: No masks were extracted. This might indicate:")
+        print("1. The model hasn't been pruned")
+        print("2. All pruned layers were skipped due to protection rules")
+        print("3. The pruning was not weight-level pruning")
+    else:
+        print(f"\nMask extraction completed! {num_masks} masks saved to {args.output_dir}")
+        print("You can now use these masks for DDPM MaskPro training.")
+        
+        # Create a summary file
+        summary_file = os.path.join(args.output_dir, "extraction_summary.txt")
+        with open(summary_file, 'w') as f:
+            f.write(f"DDPM Mask Extraction Summary\n")
+            f.write(f"Source model: {args.model_path}\n")
+            f.write(f"Total masks extracted: {num_masks}\n")
+            import datetime
+            f.write(f"Extraction date: {datetime.datetime.now()}\n")
+        
+        print(f"Summary saved to {summary_file}")
