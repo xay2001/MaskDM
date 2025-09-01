@@ -152,9 +152,14 @@ if __name__ == '__main__':
     # Save results
     loss_array = np.array(loss_list)
     
+    # Create baseline_losses directory if it doesn't exist
+    baseline_dir = "baseline_losses"
+    os.makedirs(baseline_dir, exist_ok=True)
+    
     # Create filename based on parameters
     filename = f"inference_loss_diffusion_{args.dataset}_bs{args.batch_size}_size{len(loss_list)}.npy"
-    np.save(filename, loss_array)
+    filepath = os.path.join(baseline_dir, filename)
+    np.save(filepath, loss_array)
     
     # Print statistics
     print(f"\n=== CORRECTED Baseline Loss Summary ===")
@@ -167,10 +172,10 @@ if __name__ == '__main__':
     print(f"Std baseline loss: {loss_array.std():.6f}")
     print(f"Min baseline loss: {loss_array.min():.6f}")
     print(f"Max baseline loss: {loss_array.max():.6f}")
-    print(f"Results saved to: {filename}")
+    print(f"Results saved to: {filepath}")
     
     # Save summary
-    summary_file = filename.replace('.npy', '_summary.txt')
+    summary_file = os.path.join(baseline_dir, filename.replace('.npy', '_summary.txt'))
     with open(summary_file, 'w') as f:
         f.write(f"CORRECTED Baseline Loss Computation Summary\n")
         f.write(f"Dataset: {args.dataset}\n")

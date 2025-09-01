@@ -189,12 +189,15 @@ if __name__ == '__main__':
     
     # Load baseline losses
     print("Loading baseline losses...")
+    baseline_dir = "baseline_losses"
     loss_file = f"inference_loss_diffusion_{args.dataset}_bs{args.batch_size}_size*.npy"
+    loss_pattern = os.path.join(baseline_dir, loss_file)
     import glob
-    loss_files = glob.glob(loss_file)
+    loss_files = glob.glob(loss_pattern)
     if not loss_files:
-        print(f"No baseline loss file found matching {loss_file}")
+        print(f"No baseline loss file found matching {loss_pattern}")
         print("Please run inference_loss_diffusion.py first.")
+        print(f"Expected file location: {baseline_dir}/")
         exit(1)
     
     vanilla_loss_list = np.load(loss_files[0])
