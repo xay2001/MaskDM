@@ -1,0 +1,12 @@
+CUDA_VISIBLE_DEVICES=0 python train_diffusion.py \
+      --original_model "../pretrained/ddpm_ema_cifar10" \
+      --dataset "cifar10" \
+      --lr 1.0 \
+      --epoch 3000 \
+      --logits 5.0 \
+      --dataset_size 50000 \
+      --batch_size 32 \
+      --max_step 25000 \
+      --targets all \
+      --save \
+      --output_dir "results_diffusion_full_dataset"
