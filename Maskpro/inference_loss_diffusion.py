@@ -24,6 +24,10 @@ parser.add_argument('--device', type=str, default='cuda:0', help='Device')
 parser.add_argument('--targets', nargs='+', type=str, 
                     default=['down_blocks', 'up_blocks', 'mid_block'], 
                     help='Target layer prefixes for training')
+parser.add_argument('--initial_mask_path', type=str, default='initial_mask_diffusion',
+                    help='Path to initial mask directory')
+parser.add_argument('--learned_mask_path', type=str, default='learned_mask_diffusion',
+                    help='Path to learned mask directory')
 args = parser.parse_args()
 
 def compute_diffusion_loss(model, scheduler, clean_images, device):
@@ -80,8 +84,8 @@ if __name__ == '__main__':
     model.eval()
     
     # Load initial masks and wrap model if masks exist
-    initial_mask_path = "initial_mask_diffusion"
-    learned_mask_path = "learned_mask_diffusion"
+    initial_mask_path = args.initial_mask_path
+    learned_mask_path = args.learned_mask_path
     
     initial_mask_name_list = []
     learned_mask_name_list = []

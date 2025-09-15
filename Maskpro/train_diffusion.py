@@ -35,6 +35,10 @@ parser.add_argument('--targets', nargs='+', type=str,
                     help='Target layer prefixes for training')
 parser.add_argument('--save', action='store_true', help='Save learned masks')
 parser.add_argument('--output_dir', type=str, default='results_diffusion', help='Output directory')
+parser.add_argument('--initial_mask_path', type=str, default='initial_mask_diffusion',
+                    help='Path to initial mask directory')
+parser.add_argument('--learned_mask_path', type=str, default='learned_mask_diffusion',
+                    help='Path to learned mask directory')
 
 # SwanLab arguments
 parser.add_argument('--project_name', type=str, default='DDPM-MaskPro', help='SwanLab project name')
@@ -134,8 +138,8 @@ if __name__ == '__main__':
         exit(1)
     
     # Load masks
-    initial_mask_path = "initial_mask_diffusion"
-    learned_mask_path = "learned_mask_diffusion"
+    initial_mask_path = args.initial_mask_path
+    learned_mask_path = args.learned_mask_path
     
     initial_mask_name_list = []
     learned_mask_name_list = []
@@ -482,7 +486,7 @@ if __name__ == '__main__':
     
     summary = {
         'original_model': args.original_model,
-        'mask_source': 'initial_mask_diffusion/ (from pruned model)',
+        'mask_source': f'{initial_mask_path}/ (from pruned model)',
         'methodology': 'ORIGINAL_MODEL + DYNAMIC_MASK',
         'dataset': args.dataset,
         'lr': float(args.lr),
