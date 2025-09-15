@@ -235,3 +235,4 @@ Maskpro/baseline_losses/inference_loss_diffusion_cifar10_bs64_size313.npy
 Maskpro/baseline_losses/inference_loss_diffusion_cifar10_bs128_size196_summary.txt
 Maskpro/baseline_losses/inference_loss_diffusion_cifar10_bs128_size196.npy
 finetuned_results/
+Maskpro/initial_mask_diffusion_30/
