@@ -28,7 +28,12 @@ if __name__ == "__main__":
         else:
             print("Loading model from {}".format(args.model_path))
             subfolder = 'unet' if os.path.isdir(os.path.join(args.model_path, 'unet')) else None
-            unet = UNet2DModel.from_pretrained(args.model_path, subfolder=subfolder).eval()
+            unet = UNet2DModel.from_pretrained(
+                args.model_path, 
+                subfolder=subfolder, 
+                low_cpu_mem_usage=False, 
+                ignore_mismatched_sizes=True
+            ).eval()
         pipeline = DDIMPipeline(
             unet=unet,
             scheduler=DDIMScheduler.from_pretrained(args.model_path, subfolder="scheduler")
