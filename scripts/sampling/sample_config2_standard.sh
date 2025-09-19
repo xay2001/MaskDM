@@ -5,7 +5,8 @@
 python ddpm_sample.py \
     --output_dir run/sample/maskpro/config2_standard \
     --batch_size 128 \
-    --model_path Maskpro/train_result/config2_standard/lr1.0_epoch2000_logits5.0_size20000_diffusion/checkpoint \
+    --model_path /data/xay/MaskDM/finetuned_results/masked_full_finetuned_v2 \
+    --pruned_model_ckpt /data/xay/MaskDM/finetuned_results/masked_full_finetuned_v2/pruned/unet_ema_pruned.pth \
     --total_samples 50000 \
     --ddim_steps 100 \
     --skip_type uniform \
