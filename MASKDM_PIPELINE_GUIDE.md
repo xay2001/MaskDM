@@ -209,12 +209,14 @@ python ddpm_train_simple_masked.py \
 **命令示例**:
 ```bash
 python ddpm_sample.py \
-    --model_path "./finetuned_results/masked_full_finetuned_v2" \
-    --num_samples 1000 \
-    --batch_size 32 \
-    --num_inference_steps 150 \
-    --output_dir "./samples/config2_standard" \
-    --device cuda:0
+    --output_dir run/sample/maskpro/config2_standard \
+    --batch_size 128 \
+    --model_path /data/xay/MaskDM/finetuned_results/masked_full_finetuned_v2 \
+    --pruned_model_ckpt /data/xay/MaskDM/finetuned_results/masked_full_finetuned_v2/pruned/unet_ema_pruned.pth \
+    --total_samples 50000 \
+    --ddim_steps 100 \
+    --skip_type uniform \
+    --seed 42
 ```
 
 **参数说明**:
@@ -237,10 +239,10 @@ python ddpm_sample.py \
 **命令示例**:
 ```bash
 python fid_score.py \
-    --path1 "./samples/config2_standard" \
-    --path2 "./data/cifar-10-batches-py" \
-    --batch_size 50 \
-    --device cuda:0
+  /data/xay/MaskDM/run/sample/maskpro/config2_standard/process_0 \
+  /data/xay/MaskDM/run/fid_stats_cifar10.npz \
+  --batch-size 50 \
+  --device cuda
 ```
 
 **FID评估**:
