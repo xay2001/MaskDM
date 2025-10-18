@@ -6,12 +6,12 @@ from torchvision import transforms as T
 from torchvision.datasets import CIFAR10, CIFAR100
 
 class UnlabeledImageFolder(torch.utils.data.Dataset):
-    def __init__(self, root, transform=None, exts=["*.jpg", "*.png", "*.jpeg", "*.webp"]):
+    def __init__(self, root, transform=None, exts=["jpg", "png", "jpeg", "webp"]):
         self.root = root
         self.files = []
         self.transform = transform
         for ext in exts:
-            self.files.extend(glob(os.path.join(root, '**/*.{}'.format(ext)), recursive=True))
+            self.files.extend(glob(os.path.join(root, '**', f'*.{ext}'), recursive=True))
 
     def __len__(self):
         return len(self.files)
