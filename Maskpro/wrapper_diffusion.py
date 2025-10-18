@@ -148,21 +148,21 @@ def generate_mask_from_logits(logits, N=2, M=4):
     else:
         raise ValueError(f"Unsupported logits shape: {logits.shape}")
 
-def mask_wrapper_diffusion(module, initial_mask_name_list, learned_mask_name_list, logits_magnitude, targets, prefix=""):
+def mask_wrapper_diffusion(module, initial_mask_name_list, learned_mask_name_list, logits_magnitude, targets, prefix="", initial_mask_dir="initial_mask_diffusion", learned_mask_dir="learned_mask_diffusion"):
     """Wrap DDPM model with mask functionality"""
     
     for name, child in module.named_children():
         full_name = f"{prefix}.{name}" if prefix else name
         # Skip output layers and embeddings
         if not any(skip in full_name for skip in ["conv_out", "time_emb", "class_emb"]):
-            mask_wrapper_diffusion(child, initial_mask_name_list, learned_mask_name_list, logits_magnitude, targets, full_name)
+            mask_wrapper_diffusion(child, initial_mask_name_list, learned_mask_name_list, logits_magnitude, targets, full_name, initial_mask_dir, learned_mask_dir)
             
     if isinstance(module, (nn.Conv2d, nn.Linear)):
         # Convert prefix to underscore format for matching with mask names
         prefix_underscore = prefix.replace(".", "_")
         if prefix_underscore in initial_mask_name_list:
             print(f"|--> loading mask for {prefix}, shape: {module.weight.shape}")
-            mask_path = f"initial_mask_diffusion/{prefix.replace('.', '_')}.pt"
+            mask_path = os.path.join(initial_mask_dir, f"{prefix.replace('.', '_')}.pt")
             try:
                 mask = torch.load(mask_path, weights_only=True, map_location=module.weight.device).bool().contiguous()
                 module.register_buffer("mask", mask)
@@ -179,13 +179,14 @@ def mask_wrapper_diffusion(module, initial_mask_name_list, learned_mask_name_lis
                 import types
                 module.forward = types.MethodType(forward_with_mask, module)
                         
-                # Check for learned mask
-                learned_mask_path = f"learned_mask_diffusion/{prefix.replace('.', '_')}.pt"
-                if prefix_underscore in learned_mask_name_list and os.path.exists(learned_mask_path):
-                    print(f"  |--> overwriting with learned mask for {prefix}")
-                    learned_mask = torch.load(learned_mask_path, weights_only=True, map_location=module.weight.device).bool().contiguous()
-                    module.mask.data.copy_(learned_mask)
-                    # No need to rebind forward - already done above
+                # Check for learned mask (only if learned_mask_dir is provided)
+                if learned_mask_dir is not None:
+                    learned_mask_path = os.path.join(learned_mask_dir, f"{prefix.replace('.', '_')}.pt")
+                    if prefix_underscore in learned_mask_name_list and os.path.exists(learned_mask_path):
+                        print(f"  |--> overwriting with learned mask for {prefix}")
+                        learned_mask = torch.load(learned_mask_path, weights_only=True, map_location=module.weight.device).bool().contiguous()
+                        module.mask.data.copy_(learned_mask)
+                        # No need to rebind forward - already done above
                     
                 # Add trainable logits for target layers
                 # If targets is empty or contains "all", optimize all layers with masks

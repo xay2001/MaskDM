@@ -54,7 +54,7 @@ def compute_diffusion_loss(model, scheduler, clean_images, device):
 if __name__ == '__main__':
     print(f"Computing baseline losses...")
     print(f"Original model: {args.original_model}")
-    print(f"Mask files from: initial_mask_diffusion/")
+    print(f"Mask files from: {args.initial_mask_path}")
     
     # Load ORIGINAL complete model (NOT the pruned model!)
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
@@ -85,27 +85,26 @@ if __name__ == '__main__':
     
     # Load initial masks and wrap model if masks exist
     initial_mask_path = args.initial_mask_path
-    learned_mask_path = args.learned_mask_path
     
     initial_mask_name_list = []
-    learned_mask_name_list = []
+    learned_mask_name_list = []  # Keep empty - only use initial masks from specified path
     
     if os.path.exists(initial_mask_path):
         initial_mask_name_list = [f.replace(".pt", "") for f in os.listdir(initial_mask_path) if f.endswith('.pt')]
-        print(f"Found {len(initial_mask_name_list)} initial masks")
-    
-    if os.path.exists(learned_mask_path):
-        learned_mask_name_list = [f.replace(".pt", "") for f in os.listdir(learned_mask_path) if f.endswith('.pt')]
-        print(f"Found {len(learned_mask_name_list)} learned masks")
+        print(f"Found {len(initial_mask_name_list)} masks in {initial_mask_path}")
+    else:
+        print(f"Warning: Mask path does not exist: {initial_mask_path}")
     
     # Wrap model with masks if available
     if initial_mask_name_list:
-        print(f"Applying initial masks to ORIGINAL model...")
-        print(f"This computes baseline: ORIGINAL_MODEL + INITIAL_MASK")
+        print(f"Applying masks from {initial_mask_path} to ORIGINAL model...")
+        print(f"This computes baseline: ORIGINAL_MODEL + MASK")
         mask_wrapper_diffusion(model, initial_mask_name_list, learned_mask_name_list, 
-                             logits_magnitude=10.0, targets=args.targets)
+                             logits_magnitude=10.0, targets=args.targets,
+                             initial_mask_dir=initial_mask_path,
+                             learned_mask_dir=None)
     else:
-        print("Warning: No initial masks found!")
+        print("Warning: No masks found!")
         print("This will compute loss for original unmasked model")
     
     # Load dataset
@@ -161,7 +160,11 @@ if __name__ == '__main__':
     os.makedirs(baseline_dir, exist_ok=True)
     
     # Create filename based on parameters
-    filename = f"inference_loss_diffusion_{args.dataset}_bs{args.batch_size}_size{len(loss_list)}.npy"
+    # Extract simple dataset name from path
+    dataset_name = os.path.basename(args.dataset.rstrip('/'))
+    if not dataset_name:  # In case dataset is just a name like "cifar10"
+        dataset_name = args.dataset
+    filename = f"inference_loss_diffusion_{dataset_name}_bs{args.batch_size}_size{len(loss_list)}.npy"
     filepath = os.path.join(baseline_dir, filename)
     np.save(filepath, loss_array)
     
