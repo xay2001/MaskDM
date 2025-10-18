@@ -32,6 +32,17 @@ python ddpm_weight_prune.py \
     --device cuda:0 \
 ```
 
+```bash
+python ddpm_weight_prune.py \
+    --dataset celebahq \
+    --model_path pretrained/ddpm_ema_cifar10 \
+    --save_path run/pruned/weight_magnitude/ddpm_cifar10_weight_pruned_30 \
+    --pruning_ratio $1 \
+    --batch_size 128 \
+    --pruner magnitude \
+    --device cuda:0 \
+```
+
 **参数说明**:
 - `--dataset`: 数据集名称（如 cifar10）
 - `--model_path`: 预训练DDPM模型路径（如 pretrained/ddpm_ema_cifar10）
