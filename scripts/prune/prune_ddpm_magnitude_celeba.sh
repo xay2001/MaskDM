@@ -1,0 +1,9 @@
+python ddpm_prune.py \
+--dataset celebahq \
+--model_path pretrained/ddpm_ema_celebahq_256 \
+--save_path run/pruned/random/ddpm_celebahq_pruned \
+--pruning_ratio $1 \
+--batch_size 128 \
+--pruner magnitude \
+--thr 0.05 \
+--device cuda:2 \
