@@ -1,0 +1,14 @@
+CORRECTED Baseline Loss Computation Summary
+Dataset: cifar10
+Original model: ../pretrained/ddpm_ema_cifar10
+Mask source: initial_mask_diffusion/ (extracted from pruned model)
+Computation: ORIGINAL_MODEL + EXTRACTED_INITIAL_MASK
+Batches processed: 625
+Batch size: 32
+Mean baseline loss: 0.062745
+Std baseline loss: 0.011915
+Min baseline loss: 0.038267
+Max baseline loss: 0.114476
+Note: This baseline uses ORIGINAL complete model + extracted mask
+This matches the original MaskPro methodology correctly
+Computation date: 2025-10-19 19:30:23.234291

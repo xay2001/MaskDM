@@ -41,7 +41,7 @@ parser.add_argument('--learned_mask_path', type=str, default='learned_mask_diffu
                     help='Path to learned mask directory')
 
 # SwanLab arguments
-parser.add_argument('--project_name', type=str, default='DDPM-MaskPro', help='SwanLab project name')
+parser.add_argument('--project_name', type=str, default='DDPM-MaskPro-1018', help='SwanLab project name')
 parser.add_argument('--experiment_name', type=str, default=None, help='SwanLab experiment name')
 parser.add_argument('--disable_swanlab', action='store_true', help='Disable SwanLab logging')
 
@@ -152,7 +152,7 @@ if __name__ == '__main__':
         exit(1)
     
     if os.path.exists(learned_mask_path):
-        learned_mask_name_list = [f.replace(".pt", "").replace("_", ".") for f in os.listdir(learned_mask_path) if f.endswith('.pt')]
+        learned_mask_name_list = [f.replace(".pt", "") for f in os.listdir(learned_mask_path) if f.endswith('.pt')]
         print(f"Found {len(learned_mask_name_list)} learned masks")
     
     # Check target layers (handle "all" case and name format conversion)
@@ -182,7 +182,9 @@ if __name__ == '__main__':
     print(f"Training strategy: ORIGINAL_MODEL + DYNAMIC_MASK")
     print(f"Baseline computed from: ORIGINAL_MODEL + INITIAL_MASK")
     mask_wrapper_diffusion(model, initial_mask_name_list, learned_mask_name_list, 
-                         args.logits, args.targets)
+                         args.logits, args.targets, 
+                         initial_mask_dir=initial_mask_path,
+                         learned_mask_dir=learned_mask_path)
     
     # Debug: Check if logits were added
     logits_count_after_wrapper = 0
@@ -194,7 +196,11 @@ if __name__ == '__main__':
     # Load baseline losses
     print("Loading baseline losses...")
     baseline_dir = "baseline_losses"
-    loss_file = f"inference_loss_diffusion_{args.dataset}_bs{args.batch_size}_size*.npy"
+    # Extract simple dataset name from path
+    dataset_name = os.path.basename(args.dataset.rstrip('/'))
+    if not dataset_name:  # In case dataset is just a name like "cifar10"
+        dataset_name = args.dataset
+    loss_file = f"inference_loss_diffusion_{dataset_name}_bs{args.batch_size}_size*.npy"
     loss_pattern = os.path.join(baseline_dir, loss_file)
     import glob
     loss_files = glob.glob(loss_pattern)

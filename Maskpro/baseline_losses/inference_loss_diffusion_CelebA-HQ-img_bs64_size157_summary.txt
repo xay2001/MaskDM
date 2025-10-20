@@ -1,0 +1,14 @@
+CORRECTED Baseline Loss Computation Summary
+Dataset: ../data/CelebAMask-HQ/CelebA-HQ-img
+Original model: ../pretrained/ddpm_ema_celebahq_256
+Mask source: initial_mask_diffusion/ (extracted from pruned model)
+Computation: ORIGINAL_MODEL + EXTRACTED_INITIAL_MASK
+Batches processed: 157
+Batch size: 64
+Mean baseline loss: 0.021004
+Std baseline loss: 0.006660
+Min baseline loss: 0.006824
+Max baseline loss: 0.044658
+Note: This baseline uses ORIGINAL complete model + extracted mask
+This matches the original MaskPro methodology correctly
+Computation date: 2025-10-18 23:14:48.160963
